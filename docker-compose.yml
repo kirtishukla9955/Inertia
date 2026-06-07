@@ -1,0 +1,97 @@
+networks:
+  inertia-net:
+    driver: bridge
+
+volumes:
+  inertia-redis-data:
+  inertia-qdrant-data:
+  inertia-db-data:
+  inertia-ollama-data:
+
+services:
+
+  inertia-redis:
+    image: redis:7-alpine
+    container_name: inertia-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - inertia-redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - inertia-net
+
+  inertia-qdrant:
+    image: qdrant/qdrant:latest
+    container_name: inertia-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - inertia-qdrant-data:/qdrant/storage
+    networks:
+      - inertia-net
+
+  inertia-ollama:
+    image: ollama/ollama:latest
+    container_name: inertia-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - inertia-ollama-data:/root/.ollama
+    networks:
+      - inertia-net
+    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 10 && ollama pull ${OLLAMA_MODEL:-llama3.2} && wait"]
+    environment:
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+
+  inertia-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: inertia-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - inertia-db-data:/data
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://inertia-redis:6379
+      - QDRANT_HOST=inertia-qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_URL=http://inertia-ollama:11434
+    networks:
+      - inertia-net
+    depends_on:
+      - inertia-redis
+      - inertia-qdrant
+      - inertia-ollama
+
+  inertia-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: inertia-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    networks:
+      - inertia-net
+    depends_on:
+      - inertia-api
+
+  inertia-simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    container_name: inertia-simulator
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://inertia-redis:6379
+    networks:
+      - inertia-net
+    depends_on:
+      - inertia-api
